@@ -6,9 +6,12 @@
 
 Authors: [@gmelodie]
 
-Interest Group: []
+Interest Group: [@mxinden, @guillaumemichel, @MarcoPolo]
 
 [@gmelodie]: https://github.com/gmelodie
+[@mxinden]: https://github.com/mxinden
+[@guillaumemichel]: https://github.com/guillaumemichel
+[@MarcoPolo]: https://github.com/MarcoPolo
 
 See the [lifecycle document][lifecycle-spec] for context about the maturity level
 and spec status.
@@ -38,9 +41,9 @@ is willing to store for a single key.
 **Rejection**: a node signalling to an advertiser that it will not store the
 provider record for the given key.
 
-**Spillover**: the behavior of an advertiser that, upon receiving rejections
-from the closest peers, continues advertising to progressively farther peers
-discovered during the iterative lookup.
+**Spillover**: the behavior of an advertiser that, upon failing to reach the
+replication target `k` from a batch of peers, continues advertising to
+progressively farther peers discovered during the iterative lookup.
 
 **Spillover round**: one batch of `ADD_PROVIDER` requests sent to the next
 group of candidates during a spillover.
@@ -93,16 +96,21 @@ An absent `providerStatus` field — whether because the responding node does no
 support this extension or due to a timeout — MUST be interpreted as `accepted`
 by the advertiser.
 
+`providerStatus` is a response-only field. Advertisers MUST NOT set it in
+`ADD_PROVIDER` requests. Receiving nodes MUST ignore `providerStatus` if it is
+present in an incoming request, to avoid interoperability ambiguity.
+
 ## Spillover Algorithm
 
 ### Overview
 
-When an advertiser sends `ADD_PROVIDER` to a batch of peers and all peers in
-that batch reject, it performs a **spillover round**: it moves to the next
-group of peers that are farther from the key, as discovered during the initial
-iterative lookup. This continues until either:
+When an advertiser sends `ADD_PROVIDER` to a batch of peers and the replication
+target `k` has not been reached after that batch, it performs a **spillover
+round**: it moves to the next group of peers that are farther from the key, as
+discovered during the initial iterative lookup. This continues until either:
 
-- the replication target `k` accepting peers has been reached, or
+- the replication target `k` has been reached (counting peers that accepted or
+  did not respond), or
 - the advertiser has exhausted all peers discovered during the lookup.
 
 ### Lookup phase
@@ -119,12 +127,12 @@ concurrency parameter). It then iterates over these chunks from closest to
 farthest:
 
 1. Send `ADD_PROVIDER` to all peers in the current chunk concurrently.
-2. Collect responses. Count accepting peers (absent `providerStatus` or
-   `providerStatus = accepted`) towards the replication target.
-3. If the replication target `k` accepting peers has been reached, stop.
-4. If **all** peers in the chunk rejected (a unanimous rejection), continue to
-   the next chunk (spillover round). Otherwise stop, whether the target was
-   met or not, to avoid unnecessary advertisement.
+2. Collect responses. Count peers that accepted or did not respond (absent
+   `providerStatus` or `providerStatus = accepted`) towards the replication
+   target. Peers that explicitly rejected do not count.
+3. If the replication target `k` has been reached, stop.
+4. If the target has not been reached, continue to the next chunk (spillover
+   round).
 5. If no more chunks remain, stop.
 
 **Note:** The timeout per peer in a spillover round SHOULD be slightly larger
@@ -133,9 +141,9 @@ than the base timeout to account for dial overhead to less-familiar peers.
 ### Relationship to base advertisement
 
 This algorithm is a generalisation of the base `ADD_PROVIDER` procedure. When
-no peer rejects, only the closest chunk (or the closest `k` peers) is used and
-behaviour is identical to the base spec. Spillover only occurs when unanimous
-rejections are encountered.
+the closest chunk alone satisfies the replication target, behaviour is identical
+to the base spec. Spillover only occurs when `k` has not been reached after a
+chunk.
 
 ## Protobuf
 
@@ -170,8 +178,8 @@ message Message {
 
     // Added by this extension.
     enum AddProviderStatus {
-        accepted = 0;
-        rejected = 1;
+        ACCEPTED = 0;
+        REJECTED = 1;
     }
 
     message Peer {
@@ -197,8 +205,8 @@ it, maintaining full wire-level backward compatibility.
 
 ## Backward Compatibility
 
-- Nodes that have not enabled `providerRejection` never write `providerStatus`
-  and are unaffected by receiving it.
+- Nodes that do not support this extension never write `providerStatus` and
+  are unaffected by receiving it.
 - Advertisers that do not implement spillover continue to advertise to the `k`
   closest peers; absent `providerStatus` is treated as acceptance.
 - No change is made to `GET_PROVIDERS` or any lookup message.
@@ -207,17 +215,24 @@ it, maintaining full wire-level backward compatibility.
 
 **False rejections**: an adversary controlling the closest peers to a key could
 reject all `ADD_PROVIDER` requests to suppress its advertisement. Spillover
-defeats this: unanimous rejection causes the advertiser to route around those
-peers and store the record on nodes beyond the adversary's controlled set.
-However, an adversary that mixes accepts and rejects strategically can stay
-below the unanimous-rejection threshold and reduce replication without
-triggering spillover. This is a known limitation of the unanimous-rejection
-trigger.
+mitigates unanimous rejection: any shortfall below `k` causes the advertiser
+to route around those peers and store the record on nodes beyond the adversary's
+controlled set. An adversary can limit—but not prevent—replication by mixing accepts
+and rejects across chunks, since spillover continues as long as the target is unmet.
+
+**Slot monopolisation without an eviction policy**: because re-advertisements
+from already-stored providers are always accepted regardless of the limit, the
+first `maxProvidersPerKey` providers to register for a key can hold their slots
+indefinitely simply by refreshing their records. Nodes that fill up later deny
+new providers entry, so the stored provider set becomes permanently frozen around
+whoever arrived first. Implementations MUST therefore pair `maxProvidersPerKey`
+with an eviction policy — for example, evicting the record with the oldest
+`timeReceived` when the limit is reached and a new (non-incumbent) provider
+advertises — to ensure the stored set can rotate over time and is not captured
+by early registrants.
 
 ---
 
 ## References
-
-[0]: libp2p Kademlia DHT specification – https://github.com/libp2p/specs/blob/master/kad-dht/README.md
 
 [kad-spec]: https://github.com/libp2p/specs/blob/master/kad-dht/README.md
