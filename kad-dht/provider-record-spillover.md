@@ -81,6 +81,9 @@ Nodes SHOULD also enforce coarser bounds such as total provider records stored
 (`providedKeyCapacity`), but those are outside the scope of the rejection
 signalling defined here.
 
+Nodes MAY also reject an `ADD_PROVIDER` due to other policies,
+not only capacity, which is outside of the scope of the document.
+
 ## ADD_PROVIDER Rejection
 
 ### Response signalling
@@ -90,7 +93,7 @@ Support for this extension is optional. A node that supports it MUST include a
 `ADD_PROVIDER` response:
 
 - `accepted (0)` — the record was stored.
-- `rejected (1)` — the record was not stored due to capacity limits.
+- `rejected (1)` — the record was not stored.
 
 An absent `providerStatus` field — whether because the responding node does not
 support this extension or due to a timeout — MUST be interpreted as `accepted`
@@ -225,7 +228,7 @@ from already-stored providers are always accepted regardless of the limit, the
 first `maxProvidersPerKey` providers to register for a key can hold their slots
 indefinitely simply by refreshing their records. Nodes that fill up later deny
 new providers entry, so the stored provider set becomes permanently frozen around
-whoever arrived first. Implementations MUST therefore pair `maxProvidersPerKey`
+whoever arrived first. Implementations MAY therefore pair `maxProvidersPerKey`
 with an eviction policy — for example, evicting the record with the oldest
 `timeReceived` when the limit is reached and a new (non-incumbent) provider
 advertises — to ensure the stored set can rotate over time and is not captured
