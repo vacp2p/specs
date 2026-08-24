@@ -76,6 +76,10 @@ on per message basis when the size is exceeded or just use `IDONTWANT` for all m
 
 To prevent DoS the number of `IDONTWANT` control messages is limited to `max_idontwant_messages` per heartbeat  
 
+The receiver SHOULD ignore the `IDONTWANT` messages beyond `max_idontwant_messages` within a heartbeat, and SHOULD
+downscore the peer that sent them, but only when `max_idontwant_messages` is agreed across the network. An
+implementation that disagrees with its peers on this value downscores honest peers.
+
 ### Cancelling `IWANT`
 
 If a node requested a message via `IWANT` and then occasionally receives the message from other peer it MAY 
